@@ -1,0 +1,3 @@
+Generate a task plan from the following input:
+last_assistant_answer: {{last_assistant_answer}}
+current_user_message: {{current_user_message}}

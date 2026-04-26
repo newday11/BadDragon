@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+from pathlib import Path
 import re
 from typing import Any, TYPE_CHECKING
 
@@ -17,6 +18,7 @@ if TYPE_CHECKING:
 
 MODE_SIMPLE = "simple"
 MODE_TASK = "task"
+PROMPT_DIR = Path(__file__).resolve().parents[1] / "prompts" / "task_mode"
 
 
 @dataclass
@@ -38,6 +40,26 @@ class TaskPlan:
 class TaskModeRouter:
     """LLM-first router/planner with strict minimal prompts."""
 
+    @staticmethod
+    def _load_prompt_template(filename: str, fallback: str) -> str:
+        path = PROMPT_DIR / filename
+        try:
+            if path.exists():
+                content = path.read_text(encoding="utf-8")
+                if content.strip():
+                    return content
+        except Exception:
+            pass
+        return fallback
+
+    @staticmethod
+    def _render_template(template: str, values: dict[str, Any]) -> str:
+        text = str(template or "")
+        for key, value in values.items():
+            token = "{{" + str(key) + "}}"
+            text = text.replace(token, str(value))
+        return text
+
     def route_via_llm(
         self,
         *,
@@ -45,8 +67,14 @@ class TaskModeRouter:
         last_assistant_answer: str,
         llm_client: "LLMClient",
     ) -> tuple[ModeDecision, TaskPlan | None, dict[str, Any], dict[str, Any]]:
-        system_prompt = (
+        # Stage-1: deterministic basic rules.
+        basic_mode, basic_reason, basic_hard, basic_confidence, basic_rules = self._basic_mode_judge(
+            user_text=user_text
+        )
+
+        default_system_prompt = (
             "You are a task router and planner."
+            "You are in stage-2 (LLM judge) after a stage-1 basic rule check."
             "First decide whether the request is simple or task mode."
             "Output must be JSON and JSON only."
             "Format:"
@@ -67,10 +95,29 @@ class TaskModeRouter:
             "3) In task mode each step must contain at most one major action."
             "Do not output any text outside JSON."
         )
-        user_prompt = (
+        default_user_prompt = (
             "Route and plan the following input when needed:\n"
-            f"last_assistant_answer: {last_assistant_answer or '(empty)'}\n"
-            f"current_user_message: {user_text or ''}"
+            "stage1_basic_mode: {{stage1_basic_mode}}\n"
+            "stage1_reason: {{stage1_reason}}\n"
+            "stage1_hard: {{stage1_hard}}\n"
+            "stage1_confidence: {{stage1_confidence}}\n"
+            "stage1_matched_rules: {{stage1_matched_rules}}\n"
+            "last_assistant_answer: {{last_assistant_answer}}\n"
+            "current_user_message: {{current_user_message}}"
+        )
+        system_prompt = self._load_prompt_template("route_system.txt", default_system_prompt)
+        user_template = self._load_prompt_template("route_user.txt", default_user_prompt)
+        user_prompt = self._render_template(
+            user_template,
+            {
+                "stage1_basic_mode": basic_mode or "undecided",
+                "stage1_reason": basic_reason,
+                "stage1_hard": basic_hard,
+                "stage1_confidence": f"{basic_confidence:.2f}",
+                "stage1_matched_rules": json.dumps(basic_rules, ensure_ascii=False),
+                "last_assistant_answer": last_assistant_answer or "(empty)",
+                "current_user_message": user_text or "",
+            },
         )
         resp = llm_client.chat(
             messages=[
@@ -87,6 +134,8 @@ class TaskModeRouter:
         parsed = self._parse_json_object(text)
         mode = MODE_SIMPLE
         reason = "llm_default_simple"
+        llm_mode = MODE_SIMPLE
+        llm_reason = reason
         plan: TaskPlan | None = None
         if isinstance(parsed, dict):
             raw_mode = str(parsed.get("mode", "")).strip().lower()
@@ -97,6 +146,8 @@ class TaskModeRouter:
             else:
                 mode = MODE_TASK if "task" in raw_mode or "complex" in raw_mode else MODE_SIMPLE
             reason = str(parsed.get("reason", "llm_json")) or "llm_json"
+            llm_mode = mode
+            llm_reason = reason
             if mode == MODE_TASK:
                 raw_plan = parsed.get("task_plan")
                 if isinstance(raw_plan, dict):
@@ -112,17 +163,89 @@ class TaskModeRouter:
             else:
                 mode = MODE_SIMPLE
                 reason = "llm_text_simple"
+            llm_mode = mode
+            llm_reason = reason
         if mode == MODE_TASK and plan is None:
             # safe fallback plan
             plan = self._normalize_plan({}, fallback_user_text=user_text)
-        # Local deterministic override:
-        # if the user message clearly asks for executable actions, force task mode.
-        if mode == MODE_SIMPLE and self._looks_task_like(user_text):
+
+        # Merge stage-1 and stage-2:
+        # - hard basic rules have priority;
+        # - task-conflict prefers task when stage-1 has enough confidence.
+        # - non-hard basic rules are used when LLM output is weak/invalid.
+        source = "llm"
+        conflict_policy_note = ""
+        if basic_mode in {MODE_SIMPLE, MODE_TASK} and basic_hard:
+            mode = basic_mode
+            source = "basic+llm"
+            reason = f"basic_hard:{basic_reason}; llm:{reason}"
+            if mode == MODE_TASK and plan is None:
+                plan = self._normalize_plan({}, fallback_user_text=user_text)
+        elif basic_mode == MODE_TASK and llm_mode == MODE_SIMPLE and basic_confidence >= 0.70:
             mode = MODE_TASK
-            reason = f"local_rule_override:{reason}"
+            source = "basic_conflict_override+llm"
+            conflict_policy_note = "task_conflict_override"
+            reason = (
+                f"basic_conflict_override:{basic_reason}@{basic_confidence:.2f}; "
+                f"llm:{llm_reason}"
+            )
             if plan is None:
                 plan = self._normalize_plan({}, fallback_user_text=user_text)
-        return ModeDecision(mode=mode, source="llm", reason=reason), plan, sent, returned
+        elif basic_mode == MODE_SIMPLE and llm_mode == MODE_TASK and basic_confidence >= 0.90:
+            mode = MODE_SIMPLE
+            source = "basic_conflict_override+llm"
+            conflict_policy_note = "simple_conflict_override"
+            reason = (
+                f"basic_conflict_override:{basic_reason}@{basic_confidence:.2f}; "
+                f"llm:{llm_reason}"
+            )
+        elif basic_mode in {MODE_SIMPLE, MODE_TASK} and reason in {"llm_default_simple", "llm_text_simple", "llm_text_task"}:
+            mode = basic_mode
+            source = "basic_fallback+llm"
+            reason = f"basic_fallback:{basic_reason}; llm:{reason}"
+            if mode == MODE_TASK and plan is None:
+                plan = self._normalize_plan({}, fallback_user_text=user_text)
+
+        # If mode is task, we must have a concrete and valid task plan from LLM.
+        need_explicit_plan = False
+        if mode == MODE_TASK:
+            if plan is None:
+                need_explicit_plan = True
+            elif not self._is_plan_quality_ok(plan):
+                need_explicit_plan = True
+        if need_explicit_plan:
+            planned, plan_sent, plan_returned = self.plan_task_via_llm(
+                user_text=user_text,
+                last_assistant_answer=last_assistant_answer,
+                llm_client=llm_client,
+            )
+            plan = planned
+            # Retry planning once when plan quality is still weak.
+            if not self._is_plan_quality_ok(plan):
+                planned2, plan_sent2, plan_returned2 = self.plan_task_via_llm(
+                    user_text=user_text,
+                    last_assistant_answer=last_assistant_answer,
+                    llm_client=llm_client,
+                )
+                plan = planned2
+                plan_sent = {"attempt1": plan_sent, "attempt2": plan_sent2}
+                plan_returned = {"attempt1": plan_returned, "attempt2": plan_returned2}
+            source = f"{source}+planner"
+            reason = f"{reason}; explicit_planner_used"
+            if conflict_policy_note:
+                reason = f"{reason}; {conflict_policy_note}"
+            sent = {
+                "route_sent": sent,
+                "plan_sent": plan_sent,
+            }
+            returned = {
+                "route_returned": returned,
+                "plan_returned": plan_returned,
+            }
+        elif conflict_policy_note:
+            reason = f"{reason}; {conflict_policy_note}"
+
+        return ModeDecision(mode=mode, source=source, reason=reason), plan, sent, returned
 
     def classify_via_llm(
         self,
@@ -150,7 +273,7 @@ class TaskModeRouter:
         last_assistant_answer: str,
         llm_client: "LLMClient",
     ) -> tuple[TaskPlan, dict[str, Any], dict[str, Any]]:
-        system_prompt = (
+        default_system_prompt = (
             "You are a task planner. Break the user request into executable steps."
             "Output must be JSON and JSON only."
             "JSON schema:"
@@ -163,10 +286,19 @@ class TaskModeRouter:
             "}"
             "Requirements: steps count must be 2 to 8; step_id must increase from 1; each step can contain at most one major action."
         )
-        user_prompt = (
+        default_user_prompt = (
             "Generate a task plan from the following input:\n"
-            f"last_assistant_answer: {last_assistant_answer or '(empty)'}\n"
-            f"current_user_message: {user_text or ''}"
+            "last_assistant_answer: {{last_assistant_answer}}\n"
+            "current_user_message: {{current_user_message}}"
+        )
+        system_prompt = self._load_prompt_template("plan_system.txt", default_system_prompt)
+        user_template = self._load_prompt_template("plan_user.txt", default_user_prompt)
+        user_prompt = self._render_template(
+            user_template,
+            {
+                "last_assistant_answer": last_assistant_answer or "(empty)",
+                "current_user_message": user_text or "",
+            },
         )
         resp = llm_client.chat(
             messages=[
@@ -232,8 +364,16 @@ class TaskModeRouter:
         parsed = self._parse_json_object(text) or {}
         status = str(parsed.get("status", "")).strip().lower()
         if status not in {"success", "retry", "replan", "fail"}:
-            # Safe default: retry once rather than claiming success.
-            status = "retry"
+            # Deterministic fallback: if local guard is satisfied and there is
+            # concrete tool evidence, treat as success; otherwise retry.
+            has_ok_tool = any(
+                str((item.get("result", {}) if isinstance(item, dict) else {}).get("status", "")).lower() == "ok"
+                for item in tool_events
+            )
+            if bool(local_guard.get("requirement_met", False)) and has_ok_tool:
+                status = "success"
+            else:
+                status = "retry"
         reason = str(parsed.get("reason", "llm_judge")) or "llm_judge"
         return {"status": status, "reason": reason}, sent, returned
 
@@ -325,12 +465,8 @@ class TaskModeRouter:
                     continue
                 title = str(item.get("title", "")).strip() or f"Step {i}"
                 expected = str(item.get("expected_output", "")).strip() or "Step output is completed."
-                sid = item.get("step_id", i)
-                try:
-                    sid = int(sid)
-                except Exception:
-                    sid = i
-                steps.append({"step_id": sid, "title": title, "expected_output": expected})
+                # Normalize step_id to sequential order for deterministic execution.
+                steps.append({"step_id": i, "title": title, "expected_output": expected})
         if not steps:
             steps = [
                 {
@@ -501,3 +637,76 @@ class TaskModeRouter:
         has_action = any(tok in text for tok in action_tokens)
         has_object = any(tok in text for tok in object_tokens)
         return has_action and has_object
+
+    @staticmethod
+    def _basic_mode_judge(user_text: str) -> tuple[str | None, str, bool, float, list[str]]:
+        """Stage-1 deterministic mode judgment.
+
+        Returns:
+          mode: simple/task/None
+          reason: short reason
+          hard: whether this rule should override stage-2 LLM output
+          confidence: 0~1 confidence score
+          matched_rules: matched rule ids/names
+        """
+        text = (user_text or "").strip().lower()
+        if not text:
+            return None, "empty_input", False, 0.0, []
+
+        web_task_keys = [
+            "http://", "https://", "www.", "网站", "网页", "url", "browser",
+            "打开", "访问", "navigate", "crawl", "抓取",
+        ]
+        exec_task_keys = [
+            "run ", "execute ", "install ", "deploy ", "fix ", "modify ",
+            "写代码", "改代码", "文件", ".py", ".js", ".ts", "git", "bash", "python",
+        ]
+        simple_keys = [
+            "解释", "是什么", "为什么", "how", "what", "why", "概念", "原理", "difference",
+        ]
+
+        if any(k in text for k in web_task_keys):
+            return MODE_TASK, "web_intent", True, 0.95, ["web_intent"]
+        if any(k in text for k in exec_task_keys):
+            return MODE_TASK, "execution_intent", True, 0.90, ["execution_intent"]
+        if any(k in text for k in simple_keys) and not TaskModeRouter._looks_task_like(text):
+            return MODE_SIMPLE, "explanatory_intent", False, 0.72, ["explanatory_intent"]
+        if TaskModeRouter._looks_task_like(text):
+            return MODE_TASK, "action_object_pattern", False, 0.68, ["action_object_pattern"]
+        return None, "no_rule_hit", False, 0.0, []
+
+    @staticmethod
+    def _is_plan_quality_ok(plan: TaskPlan | None) -> bool:
+        if plan is None:
+            return False
+        steps = plan.steps if isinstance(plan.steps, list) else []
+        if len(steps) < 2 or len(steps) > 8:
+            return False
+        expected_sid = 1
+        for item in steps:
+            if not isinstance(item, dict):
+                return False
+            sid = item.get("step_id")
+            try:
+                sid_int = int(sid)
+            except Exception:
+                return False
+            if sid_int != expected_sid:
+                return False
+            title = str(item.get("title", "") or "").strip()
+            expected = str(item.get("expected_output", "") or "").strip()
+            if not title or not expected:
+                return False
+            if not TaskModeRouter._is_single_major_action_title(title):
+                return False
+            expected_sid += 1
+        return True
+
+    @staticmethod
+    def _is_single_major_action_title(title: str) -> bool:
+        t = str(title or "").strip().lower()
+        if not t:
+            return False
+        # Heuristic guard: avoid compound titles that bundle multiple major actions.
+        multi_action_markers = [" and ", " then ", "并且", "然后", "以及", "同时", "；", ";"]
+        return not any(m in t for m in multi_action_markers)

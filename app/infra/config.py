@@ -53,6 +53,10 @@ def default_config() -> dict[str, Any]:
             "max_tokens": 2048,
         },
         "fallback_providers": [],
+        "search": {
+            "max_results": 5,
+            "timeout": 20,
+        },
     }
 
 

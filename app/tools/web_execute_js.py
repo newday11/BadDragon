@@ -73,8 +73,9 @@ def run(arguments: dict[str, Any]) -> dict[str, Any]:
     status = "ok"
     error = ""
     if needs_physical_open and not browser_opened:
-        status = "error"
-        error = "physical browser did not open"
+        # Headless/server environments often cannot launch a physical browser.
+        # Keep navigation as successful when in-memory tab state is updated.
+        payload["warning"] = "physical browser did not open (headless/server mode)"
 
     return {
         "status": status,

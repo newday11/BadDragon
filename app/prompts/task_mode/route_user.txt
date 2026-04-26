@@ -1,0 +1,8 @@
+Route and plan the following input when needed:
+stage1_basic_mode: {{stage1_basic_mode}}
+stage1_reason: {{stage1_reason}}
+stage1_hard: {{stage1_hard}}
+stage1_confidence: {{stage1_confidence}}
+stage1_matched_rules: {{stage1_matched_rules}}
+last_assistant_answer: {{last_assistant_answer}}
+current_user_message: {{current_user_message}}

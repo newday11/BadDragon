@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
-from urllib import request
+from urllib import error, request
 
 from app.llm.runtime_provider import RuntimeProvider, resolve_runtime_provider
 
@@ -38,9 +39,10 @@ class LLMClient:
         temperature: float | int | None = None,
         max_tokens: int | None = None,
     ) -> Any:
+        normalized_messages = self._normalize_messages(messages)
         kwargs: dict[str, Any] = {
             "model": model or self.runtime.model,
-            "messages": messages,
+            "messages": normalized_messages,
             "temperature": self.runtime.temperature if temperature is None else temperature,
             "max_tokens": self.runtime.max_tokens if max_tokens is None else max_tokens,
         }
@@ -60,6 +62,40 @@ class LLMClient:
         resp = self._chat_via_http(kwargs)
         self.last_returned_payload = resp
         return resp
+
+    @staticmethod
+    def _normalize_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Normalize message list for providers with strict schema handling.
+
+        Some OpenAI-compatible gateways reject requests that contain multiple
+        `system` messages. Merge all system messages into one while preserving
+        non-system message order.
+        """
+        merged: list[dict[str, Any]] = []
+        system_chunks: list[str] = []
+        first_system_index: int | None = None
+
+        for item in messages:
+            if not isinstance(item, dict):
+                continue
+            role = str(item.get("role", "")).strip().lower()
+            if role == "system":
+                if first_system_index is None:
+                    first_system_index = len(merged)
+                    merged.append(dict(item))
+                content = str(item.get("content", "") or "").strip()
+                if content:
+                    system_chunks.append(content)
+                continue
+            merged.append(dict(item))
+
+        if first_system_index is not None:
+            base = dict(merged[first_system_index])
+            base["role"] = "system"
+            base["content"] = "\n\n".join(system_chunks).strip()
+            merged[first_system_index] = base
+
+        return merged
 
     @staticmethod
     def extract_text(resp: Any) -> str:
@@ -151,14 +187,27 @@ class LLMClient:
 
     def _chat_via_http(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         url = f"{self.runtime.base_url.rstrip('/')}/chat/completions"
-        req = request.Request(
-            url=url,
-            data=json.dumps(kwargs, ensure_ascii=False).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {self.runtime.api_key}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
-        with request.urlopen(req, timeout=120) as resp:
-            return json.loads(resp.read().decode("utf-8", errors="replace"))
+        payload = json.dumps(kwargs, ensure_ascii=False).encode("utf-8")
+        headers = {
+            "Authorization": f"Bearer {self.runtime.api_key}",
+            "Content-Type": "application/json",
+        }
+        attempts = 3
+        for idx in range(attempts):
+            req = request.Request(
+                url=url,
+                data=payload,
+                headers=headers,
+                method="POST",
+            )
+            try:
+                with request.urlopen(req, timeout=120) as resp:
+                    return json.loads(resp.read().decode("utf-8", errors="replace"))
+            except error.HTTPError as exc:
+                body = exc.read().decode("utf-8", errors="replace")
+                # Some OpenAI-compatible gateways are intermittently unstable.
+                if exc.code >= 500 and idx < attempts - 1:
+                    time.sleep(0.6 * (idx + 1))
+                    continue
+                raise RuntimeError(f"LLM HTTP {exc.code}: {body}") from exc
+        raise RuntimeError("LLM HTTP request failed after retries")

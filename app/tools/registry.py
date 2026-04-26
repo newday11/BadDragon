@@ -10,6 +10,7 @@ from . import file_patch as file_patch_tool
 from . import file_read as file_read_tool
 from . import file_write as file_write_tool
 from . import web_execute_js as web_execute_js_tool
+from . import web_search as web_search_tool
 from . import web_scan as web_scan_tool
 
 
@@ -25,6 +26,7 @@ class ToolRegistry:
             "file_write": file_write_tool.run,
             "web_scan": web_scan_tool.run,
             "web_execute_js": web_execute_js_tool.run,
+            "web_search": web_search_tool.run,
             "ask_user": ask_user_tool.run,
         }
 
@@ -145,6 +147,30 @@ class ToolRegistry:
                             "switch_tab_id": {"type": "string"},
                             "text_only": {"type": "boolean", "default": False},
                         },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "web_search",
+                    "description": "Search the web and return top result links/snippets.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string", "description": "Search query text."},
+                            "max_results": {
+                                "type": "integer",
+                                "description": "Max result count (1-10).",
+                                "default": 5,
+                            },
+                            "timeout": {
+                                "type": "integer",
+                                "description": "Request timeout seconds.",
+                                "default": 20,
+                            },
+                        },
+                        "required": ["query"],
                     },
                 },
             },

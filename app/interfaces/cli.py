@@ -87,16 +87,6 @@ def run_terminal_chat_with_debug(debug_io: bool = False, debug_lite: bool = Fals
     # In debug mode we run memory updates synchronously so request/response payloads
     # are available immediately in the same turn.
     loop = SimpleAgentLoop(async_memory_updates=not (debug_io or debug_lite))
-    active = loop.runtime_store.load_active()
-    if isinstance(active, dict):
-        task_name = str((active.get("plan", {}) or {}).get("task_name", "")).strip() or "Unknown task"
-        step_index = int(active.get("step_index", 0) or 0)
-        print(
-            f"[Runtime] Found unfinished task: {task_name} (next_step_index={step_index}). "
-            "Type `resume` to continue.",
-            flush=True,
-        )
-
     def on_progress(event: str, payload: dict) -> None:
         if event == "task_plan":
             for step in payload.get("steps", []) or []:
@@ -178,7 +168,7 @@ def run_terminal_chat_with_debug(debug_io: bool = False, debug_lite: bool = Fals
                 f"task_final_verify={s.get('task_final_verify', 0)}, "
                 f"task_replan={s.get('task_replan', 0)}, planner={s.get('planner', 0)}, "
                 f"owner_memory={s.get('owner_memory', 0)}, project_memory={s.get('project_memory', 0)}, "
-                f"other={s.get('other', 0)}, resumed={s.get('resumed', 0)})",
+                f"other={s.get('other', 0)})",
                 flush=True,
             )
             step_traces = [x for x in (loop.last_step_traces or []) if isinstance(x, dict) and "step" in x]
