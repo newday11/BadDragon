@@ -1,11 +1,7 @@
 # BadDragon
 
 <p align="center">
-  <img src="assets/brand/baddragon-logo-fire.png" alt="BadDragon Fire Logo" width="920" />
-</p>
-
-<p align="center">
-  <img src="assets/brand/baddragon-avatar-fire.png" alt="BadDragon Avatar" width="92" />
+  <img src="assets/brand/baddragon-banner-640x320.png" alt="BadDragon Banner" width="640" />
 </p>
 
 <p align="center"><strong>Layer-First Agent Runtime with Memory and Tool-Evidence Guardrails</strong></p>
@@ -197,6 +193,3 @@ When contributing:
 3. Avoid cross-layer shortcuts for convenience.
 4. Document new modules and config changes.
 
-## Acknowledgement
-
-This README structure is inspired by the clarity and onboarding style of [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent), while the architecture and implementation goals here are specific to BadDragon.
