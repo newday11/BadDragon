@@ -3,7 +3,7 @@
     "default": "GLM-5",
     "provider": "custom",
     "base_url": "https://modelservice.jdcloud.com/coding/openai/v1",
-    "api_key": "pk-ade9f804-6648-447f-8f7f-4c338058c967",
+    "api_key": "",
     "api_mode": "chat_completions",
     "temperature": 0.2,
     "max_tokens": 2048

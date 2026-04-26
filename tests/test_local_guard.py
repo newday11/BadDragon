@@ -22,7 +22,7 @@ class LocalGuardTests(unittest.TestCase):
         ]
         guard = self.loop._build_local_guard(
             tool_events=tool_events,
-            user_text="打开百度",
+            user_text="Open Baidu",
             current_step={"title": "Open browser"},
         )
         self.assertFalse(bool(guard.get("requirement_met")))
@@ -40,7 +40,7 @@ class LocalGuardTests(unittest.TestCase):
         ]
         guard = self.loop._build_local_guard(
             tool_events=tool_events,
-            user_text="打开百度",
+            user_text="Open Baidu",
             current_step={"title": "Navigate to target website"},
         )
         self.assertTrue(bool(guard.get("requirement_met")))

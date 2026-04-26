@@ -46,29 +46,29 @@ class TaskModeRouter:
         llm_client: "LLMClient",
     ) -> tuple[ModeDecision, TaskPlan | None, dict[str, Any], dict[str, Any]]:
         system_prompt = (
-            "你是任务路由与规划器。"
-            "先判断是simple还是task。"
-            "输出必须是JSON，且只能输出JSON。"
-            "格式为："
+            "You are a task router and planner."
+            "First decide whether the request is simple or task mode."
+            "Output must be JSON and JSON only."
+            "Format:"
             "{"
             "\"mode\":\"simple|task\","
             "\"reason\":\"string\","
-            "\"answer\":\"string, simple时填写，task时可为空\","
+            "\"answer\":\"string, required in simple mode and optional in task mode\","
             "\"task_plan\":{"
             "\"task_name\":\"string\","
             "\"steps\":[{\"step_id\":1,\"title\":\"string\",\"expected_output\":\"string\"}],"
             "\"done_criteria\":[\"string\"],"
             "\"fail_policy\":{\"max_retry_per_step\":2}"
             "} | null"
-            "}。"
-            "要求："
-            "1) simple时：task_plan必须为null。"
-            "2) task时：answer可为空，task_plan必须完整，steps数量2到8，step_id从1递增。"
-            "3) task时每个step最多只包含一个主要动作（one major action per step）。"
-            "不要输出JSON以外任何文本。"
+            "}."
+            "Requirements:"
+            "1) In simple mode: task_plan must be null."
+            "2) In task mode: answer may be empty, task_plan must be complete, steps count must be 2 to 8, and step_id must increase from 1."
+            "3) In task mode each step must contain at most one major action."
+            "Do not output any text outside JSON."
         )
         user_prompt = (
-            "请路由并按需规划以下输入:\n"
+            "Route and plan the following input when needed:\n"
             f"last_assistant_answer: {last_assistant_answer or '(empty)'}\n"
             f"current_user_message: {user_text or ''}"
         )
@@ -151,9 +151,9 @@ class TaskModeRouter:
         llm_client: "LLMClient",
     ) -> tuple[TaskPlan, dict[str, Any], dict[str, Any]]:
         system_prompt = (
-            "你是任务规划器。把用户请求拆成可执行步骤。"
-            "输出必须是JSON，且只能输出JSON。"
-            "JSON结构:"
+            "You are a task planner. Break the user request into executable steps."
+            "Output must be JSON and JSON only."
+            "JSON schema:"
             "{"
             "\"mode\":\"task\","
             "\"task_name\":\"string\","
@@ -161,10 +161,10 @@ class TaskModeRouter:
             "\"done_criteria\":[\"string\"],"
             "\"fail_policy\":{\"max_retry_per_step\":2}"
             "}"
-            "要求: steps数量2到8；step_id从1递增；每个step最多只包含一个主要动作（one major action per step）。"
+            "Requirements: steps count must be 2 to 8; step_id must increase from 1; each step can contain at most one major action."
         )
         user_prompt = (
-            "请根据以下信息生成任务步骤:\n"
+            "Generate a task plan from the following input:\n"
             f"last_assistant_answer: {last_assistant_answer or '(empty)'}\n"
             f"current_user_message: {user_text or ''}"
         )
@@ -194,9 +194,9 @@ class TaskModeRouter:
         llm_client: "LLMClient",
     ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
         system_prompt = (
-            "你是步骤结果判定器。"
-            "仅输出JSON: {\"status\":\"success|retry|replan|fail\",\"reason\":\"...\"}。"
-            "不要输出JSON以外文本。"
+            "You are a step-result judge."
+            "Output JSON only: {\"status\":\"success|retry|replan|fail\",\"reason\":\"...\"}."
+            "Do not output text outside JSON."
         )
         compact_events: list[dict[str, Any]] = []
         for item in tool_events[-8:]:
@@ -211,12 +211,12 @@ class TaskModeRouter:
                 }
             )
         user_prompt = (
-            "请判定当前步骤执行结果:\n"
+            "Judge the current step execution result:\n"
             f"current_step: {json.dumps(current_step, ensure_ascii=False)}\n"
             f"tool_events: {json.dumps(compact_events, ensure_ascii=False)}\n"
             f"assistant_response_text: {assistant_response_text or ''}\n"
             f"local_guard: {json.dumps(local_guard, ensure_ascii=False)}\n"
-            "规则: 若local_guard.requirement_met为false，不能输出success。"
+            "Rule: if local_guard.requirement_met is false, success is forbidden."
         )
         resp = llm_client.chat(
             messages=[
@@ -246,13 +246,13 @@ class TaskModeRouter:
         llm_client: "LLMClient",
     ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
         system_prompt = (
-            "你是任务最终验收器。"
-            "必须严格根据done_criteria判断任务是否真正完成。"
-            "仅输出JSON: {\"status\":\"pass|fail\",\"reason\":\"...\"}。"
-            "不要输出JSON以外文本。"
+            "You are the final task verifier."
+            "You must strictly evaluate completion against done_criteria."
+            "Output JSON only: {\"status\":\"pass|fail\",\"reason\":\"...\"}."
+            "Do not output text outside JSON."
         )
         user_prompt = (
-            "请做最终验收:\n"
+            "Run final verification:\n"
             f"user_goal: {user_text or ''}\n"
             f"done_criteria: {json.dumps(done_criteria, ensure_ascii=False)}\n"
             f"execution_log: {json.dumps(execution_log, ensure_ascii=False)}"
@@ -285,13 +285,13 @@ class TaskModeRouter:
         llm_client: "LLMClient",
     ) -> tuple[TaskPlan, dict[str, Any], dict[str, Any]]:
         system_prompt = (
-            "你是任务重规划器。"
-            "基于失败原因重规划剩余步骤。"
-            "只输出JSON，结构与任务规划器一致。"
-            "不要输出JSON以外文本。"
+            "You are a task replanner."
+            "Replan remaining steps based on the failure reason."
+            "Output JSON only, using the same schema as the task planner."
+            "Do not output text outside JSON."
         )
         user_prompt = (
-            "请重规划以下任务的剩余步骤:\n"
+            "Replan the remaining steps for this task:\n"
             f"user_goal: {user_text}\n"
             f"original_plan: {json.dumps(original_plan.__dict__, ensure_ascii=False)}\n"
             f"failed_step: {json.dumps(current_step, ensure_ascii=False)}\n"
@@ -316,7 +316,7 @@ class TaskModeRouter:
         fallback_goal = str(fallback_user_text or "").strip()
         task_name = str(data.get("task_name", "") or "").strip()
         if not task_name:
-            task_name = fallback_goal or "执行用户请求"
+            task_name = fallback_goal or "Execute user request"
         raw_steps = data.get("steps")
         steps: list[dict[str, Any]] = []
         if isinstance(raw_steps, list):
@@ -373,9 +373,7 @@ class TaskModeRouter:
     def _expand_to_min_two_steps(*, steps: list[dict[str, Any]], goal: str) -> list[dict[str, Any]]:
         g = str(goal or "").strip()
         low = g.lower()
-        is_web_goal = any(k in g for k in ["网站", "浏览器", "网页", "百度", "淘宝"]) or any(
-            k in low for k in ["http://", "https://", "www.", "browser", "website", "web"]
-        )
+        is_web_goal = any(k in low for k in ["http://", "https://", "www.", "browser", "website", "web", "url"])
         if is_web_goal:
             return [
                 {
@@ -411,7 +409,7 @@ class TaskModeRouter:
     def _fallback_step_title(goal: str) -> str:
         g = str(goal or "").strip()
         if not g:
-            return "执行用户请求"
+            return "Execute user request"
         # keep it short and readable in CLI
         if len(g) <= 36:
             return g
@@ -421,8 +419,8 @@ class TaskModeRouter:
     def _fallback_expected_output(goal: str) -> str:
         g = str(goal or "").strip()
         if not g:
-            return "步骤完成。"
-        return f"已完成：{g}"
+            return "Step completed."
+        return f"Completed: {g}"
 
     @staticmethod
     def _parse_json_object(text: str) -> dict[str, Any] | None:
@@ -466,39 +464,29 @@ class TaskModeRouter:
         if not text:
             return False
         action_tokens = [
-            "打开",
-            "创建",
-            "搭建",
-            "开发",
-            "修改",
-            "重构",
-            "修复",
-            "运行",
-            "安装",
-            "部署",
-            "生成",
-            "查询文件",
             "open ",
             "create ",
             "build ",
+            "develop ",
             "run ",
             "install ",
             "deploy ",
             "fix ",
             "modify ",
+            "refactor ",
+            "generate ",
+            "query file",
         ]
         object_tokens = [
-            "网站",
-            "页面",
-            "代码",
-            "脚本",
-            "文件",
-            "项目",
-            "接口",
-            "数据库",
-            "浏览器",
-            "淘宝",
-            "百度",
+            "website",
+            "webpage",
+            "code",
+            "script",
+            "file",
+            "project",
+            "api",
+            "database",
+            "browser",
             "python",
             "bash",
             "git",

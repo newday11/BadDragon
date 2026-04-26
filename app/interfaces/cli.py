@@ -21,7 +21,7 @@ def run_hello_and_capture() -> dict:
         "model": runtime.model,
         "messages": [
             {"role": "system", "content": build_system_prompt_protocol()},
-            {"role": "user", "content": "你好"},
+            {"role": "user", "content": "hello"},
         ],
         "temperature": runtime.temperature,
         "max_tokens": runtime.max_tokens,
@@ -75,8 +75,8 @@ def run_terminal_chat() -> None:
     """Run minimal terminal chat loop.
 
     Format:
-      > 你好
-      AI: 你好！...
+      > hello
+      AI: Hello! ...
       > exit
     """
     run_terminal_chat_with_debug(debug_io=False, debug_lite=False)

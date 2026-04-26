@@ -13,10 +13,10 @@ class RuntimeStoreTests(unittest.TestCase):
             root = Path(td)
             store = TaskRuntimeStore(root_dir=root)
             store.begin_task(
-                user_goal="打开百度",
+                user_goal="Open Baidu",
                 plan={
                     "mode": "task",
-                    "task_name": "打开百度",
+                    "task_name": "Open Baidu",
                     "steps": [{"step_id": 1, "title": "Open browser", "expected_output": "opened"}],
                     "done_criteria": ["opened"],
                     "fail_policy": {"max_retry_per_step": 2},
@@ -31,7 +31,7 @@ class RuntimeStoreTests(unittest.TestCase):
             active = store.load_active() or {}
             self.assertEqual(int(active.get("step_index", 0)), 1)
 
-            store.finalize(status="done", summary={"task_name": "打开百度"})
+            store.finalize(status="done", summary={"task_name": "Open Baidu"})
             self.assertIsNone(store.load_active())
             self.assertTrue(store.last_path.exists())
 

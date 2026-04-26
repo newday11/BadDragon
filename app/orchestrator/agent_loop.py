@@ -81,7 +81,7 @@ class SimpleAgentLoop:
             plan_data = active.get("plan", {}) if isinstance(active, dict) else {}
             plan = TaskPlan(
                 mode=str(plan_data.get("mode", MODE_TASK) or MODE_TASK),
-                task_name=str(plan_data.get("task_name", "恢复任务")),
+                task_name=str(plan_data.get("task_name", "Resumed task")),
                 steps=list(plan_data.get("steps", []) or []),
                 done_criteria=list(plan_data.get("done_criteria", []) or ["All planned steps are completed."]),
                 fail_policy=dict(plan_data.get("fail_policy", {}) or {"max_retry_per_step": 2}),
@@ -111,7 +111,7 @@ class SimpleAgentLoop:
             else:
                 content = self._ask_simple_mode(user_text)
 
-        content = str(content).strip() or "我收到了你的消息，但这次没有拿到有效回复。"
+        content = str(content).strip() or "I received your message, but no valid response was generated this turn."
         self.last_assistant_text = content
 
         self.memory.record_turn_with_mode(
@@ -176,7 +176,7 @@ class SimpleAgentLoop:
     @staticmethod
     def _is_resume_command(text: str) -> bool:
         t = str(text or "").strip().lower()
-        return t in {"resume", "继续", "继续任务", "继续上次任务", "继续执行"}
+        return t in {"resume", "continue", "continue task", "resume task", "resume execution"}
 
     def _emit_progress(self, event: str, payload: dict[str, Any]) -> None:
         if self._progress_callback is None:
@@ -611,9 +611,9 @@ class SimpleAgentLoop:
             {
                 "role": "user",
                 "content": (
-                    f"总目标: {user_text}\n"
-                    f"当前步骤: {json.dumps(current_step, ensure_ascii=False)}\n"
-                    "请只执行/推进当前步骤，并给出可核验结果。"
+                    f"Overall goal: {user_text}\n"
+                    f"Current step: {json.dumps(current_step, ensure_ascii=False)}\n"
+                    "Execute or advance only the current step and provide verifiable evidence."
                 ),
             }
         )
@@ -651,7 +651,7 @@ class SimpleAgentLoop:
                         {
                             "role": "system",
                             "content": (
-                                "请先执行第一步并返回工具结果，不要一次性给完整方案。"
+                                "Execute the first step and return tool results before providing a full plan."
                             ),
                         }
                     )
@@ -742,7 +742,7 @@ class SimpleAgentLoop:
         combined_text = f"{user_text}\n{json.dumps(current_step, ensure_ascii=False)}".lower()
         web_intent = any(
             k in combined_text
-            for k in ["网站", "网页", "浏览器", "百度", "淘宝", "http://", "https://", "www.", "browser", "website"]
+            for k in ["website", "webpage", "browser", "http://", "https://", "www.", "web", "url"]
         )
         # hard success requirement for executable steps:
         # must have at least one tool call and at least one ok result.
