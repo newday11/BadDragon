@@ -1,8 +1,17 @@
 # BadDragon
 
-BadDragon is a lightweight, layer-first agent framework focused on controllability and clean evolution.
+<p align="center">
+  <img src="assets/brand/baddragon-logo-fire.png" alt="BadDragon Fire Logo" width="920" />
+</p>
 
-It keeps the core loop small, enforces strict architectural boundaries, and is designed for teams that want to move fast without turning the codebase into a monolith.
+<p align="center">
+  <img src="assets/brand/baddragon-avatar-fire.png" alt="BadDragon Avatar" width="92" />
+</p>
+
+<p align="center"><strong>Layer-First Agent Runtime with Memory and Tool-Evidence Guardrails</strong></p>
+
+BadDragon is a lightweight, layer-first agent framework focused on controllability and clean evolution.
+It keeps the core loop compact, enforces strict architectural boundaries, and is designed for teams that want to move fast without turning the codebase into a monolith.
 
 ## Project Status
 
@@ -143,6 +152,7 @@ Execution guardrails:
 ## Repository Layout
 
 - `app/`: core source code
+- `assets/brand/`: logo, avatar, and favicon assets
 - `data/`: runtime data
 - `logs/`: runtime logs
 - `tests/`: unit tests
