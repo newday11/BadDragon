@@ -1,87 +1,192 @@
 # BadDragon
 
-Minimal agent scaffold with clear layered architecture:
+BadDragon is a lightweight, layer-first agent framework focused on controllability and clean evolution.
 
-- `app/interfaces`: CLI/API/UI entrypoints
-- `app/orchestrator`: loop and state machine
-- `app/llm`: model gateway
-- `app/tools`: tool definitions and dispatcher
-- `app/memory`: memory read/write and injection
-- `app/infra`: config/logging/storage helpers
-- `data`: local runtime data (e.g. sqlite)
-- `logs`: runtime logs
-- `tests`: tests
+It keeps the core loop small, enforces strict architectural boundaries, and is designed for teams that want to move fast without turning the codebase into a monolith.
 
-## Six-Layer Architecture (Required)
+## Project Status
 
-BadDragon development must follow this fixed six-layer design:
+This project is actively evolving and still under heavy development.
 
-1. `interfaces`
-   Only handles input/output boundaries (CLI/API/UI). No business logic.
-2. `orchestrator`
-   Only handles task orchestration, turn loop, and state transitions.
-3. `llm`
-   Only handles model requests, responses, and tool-call parsing.
-4. `tools`
-   Only implements executable tools and tool registry/dispatching.
-5. `memory`
-   Only handles memory read/write and prompt injection strategy.
-6. `infra`
-   Only handles shared infrastructure (config, logging, storage, utilities).
+- APIs, module boundaries, and behavior may change.
+- We prioritize correctness, clarity, and maintainability over premature feature expansion.
+- Contributions and issue reports are welcome.
 
-### Boundary Rule
+## Why BadDragon
 
-Use strict one-way dependencies:
+- Strict six-layer architecture with explicit dependency direction.
+- Dual orchestration modes (`simple` and `task`) for incremental complexity.
+- Tool-evidence guardrails to avoid "claimed success without real execution".
+- Minimal dependency strategy with OpenAI-compatible model access.
+- Local runtime persistence for resumable task execution.
 
-`interfaces -> orchestrator -> (llm/tools/memory) -> infra`
+## Memory Engine Blueprint
 
-No reverse coupling across layers.
+BadDragon memory is not a single blob. It is a layered memory system with scheduled refresh, compaction limits, and runtime injection.
 
-## 六大层级规范（必须遵守）
+```mermaid
+flowchart LR
+    U["User Turn"] --> A["record_turn_with_mode()"]
+    A --> B["Context Write<br/>SQLite: context_memory"]
+    A --> C{"Refresh Due?"}
 
-后续开发统一按以下六层实施，每层一个目录，禁止职责混写：
+    C -->|Owner due| D["Owner Memory Worker"]
+    C -->|Project due| E["Project Memory Worker"]
+    C -->|No| F["Skip Refresh"]
 
-1. `interfaces`：只负责输入输出（CLI/API/UI）。
-2. `orchestrator`：只负责编排、循环和状态机。
-3. `llm`：只负责模型通信与返回解析。
-4. `tools`：只负责工具实现与注册分发。
-5. `memory`：只负责记忆读写与注入策略。
-6. `infra`：只负责配置、日志、存储和通用基础能力。
+    D --> D1["owner_profile_memory"]
+    D --> D2["owner_global_constraints"]
+    E --> E1["project_short_term_memory"]
+    E --> E2["project_long_term_memory"]
 
-依赖方向固定为：
+    D1 --> G["Byte Guard + Compaction"]
+    D2 --> G
+    E1 --> G
+    E2 --> G
 
-`interfaces -> orchestrator -> (llm/tools/memory) -> infra`
+    G --> H["memory/blocks write-back"]
+    H --> I["build_memory_system_sections()"]
+    I --> J["Prompt Injection<br/>simple/task budgets"]
+    J --> K["LLM Inference"]
+```
 
-## Run
+Operational characteristics:
 
-Run directly in project directory:
+- Context turns are persisted first, then memory refresh is evaluated.
+- Owner memory refresh interval is dynamic (fast when memory is small, slower when it grows).
+- Project memory refresh requires enough recent context and runs on fixed cadence.
+- Every memory block has hard byte limits with local safety compaction.
+- Injected memory is mode-aware (`simple` vs `task`) with different section budgets.
+
+## Quick Start
 
 ```bash
 python3 -m app.main
 ```
 
-Quick payload capture test:
+Quick smoke path:
 
 ```bash
 python3 -m app.main --hello
 ```
 
-## Dependency Strategy
+Run tests:
 
-Follow GenericAgent-style dependency management:
+```bash
+python3 -m unittest discover tests
+```
 
-1. Keep minimal required dependencies only.
-2. Start first, then install optional packages when needed.
-3. Do not preinstall all possible packages.
+## Architecture
 
-Notes:
+BadDragon follows a fixed six-layer design:
 
-1. `openai` SDK is optional in current version (HTTP fallback exists).
-2. Future tools/frontends should be added as optional, not forced by default.
+1. `app/interfaces`
+   Input/output boundaries only (CLI/API/UI entrypoints).
+2. `app/orchestrator`
+   Task routing, loop control, and state transitions.
+3. `app/llm`
+   Model requests, responses, and tool-call normalization.
+4. `app/tools`
+   Tool implementations and registry/dispatch.
+5. `app/memory`
+   Memory storage, retrieval, and prompt injection.
+6. `app/infra`
+   Shared config/logging/storage/utilities.
 
-## Model Config
+Required dependency direction:
 
-1. Prefer editing `config.json` (zero third-party dependency).
-2. Set `model.default`, `model.provider`, `model.base_url`, `model.api_key`.
-3. Runtime provider is resolved by `app/llm/runtime_provider.py`.
-4. Current default uses OpenAI-compatible `chat.completions`.
+`interfaces -> orchestrator -> (llm/tools/memory) -> infra`
+
+Reverse coupling across layers is not allowed.
+
+## Operation Blueprint
+
+This is the runtime control loop that keeps execution grounded in observable tool evidence.
+
+```mermaid
+flowchart TD
+    A["User Input"] --> B["Mode Router<br/>simple or task"]
+
+    B -->|simple| C["Direct Answer Path"]
+    C --> Z["Record Turn + Memory Pipeline"]
+
+    B -->|task| D["Task Plan Init + RuntimeStore begin_task"]
+    D --> E["Execute Current Step<br/>LLM + Tool Calls (max rounds)"]
+    E --> F["Local Guard Check<br/>require tool evidence"]
+    F --> G["LLM Step Judge<br/>success retry replan"]
+
+    G -->|success| H["Step Done + Persist Progress"]
+    H --> I{"More Steps?"}
+    I -->|yes| E
+    I -->|no| J["Final Verify against done_criteria"]
+
+    G -->|retry| K["Escalated Retry Stage"]
+    K --> E
+
+    G -->|replan| L["Replan Remaining Steps"]
+    L --> E
+
+    J -->|pass| M["Finalize: done"]
+    J -->|fail| N["Finalize: fail"]
+
+    M --> Z
+    N --> Z
+```
+
+Execution guardrails:
+
+- Task mode enforces one-step focus with observable evidence before claiming success.
+- Web-intent tasks require valid web actions (not just empty scans) to pass local guard.
+- No-new-information retries are blocked and forced to replan.
+- Runtime state is resumable through `TaskRuntimeStore` with active/last snapshots.
+
+## Repository Layout
+
+- `app/`: core source code
+- `data/`: runtime data
+- `logs/`: runtime logs
+- `tests/`: unit tests
+- `config.json`: runtime model/provider settings
+
+## Model Configuration
+
+Edit `config.json`:
+
+- `model.default`
+- `model.provider`
+- `model.base_url`
+- `model.api_key`
+
+Provider resolution lives in `app/llm/runtime_provider.py`.
+
+Current runtime path is OpenAI-compatible `chat.completions`, with SDK-optional fallback behavior.
+
+## Design Principles
+
+- Keep required dependencies minimal.
+- Add optional capabilities as optional dependencies.
+- Preserve deterministic structure before adding surface features.
+- Keep each layer single-purpose and easy to test.
+
+## Roadmap (Early Stage)
+
+- Better external browser/session integration.
+- Expanded tool library with stronger safety constraints.
+- More robust memory update and retrieval strategies.
+- API-facing interface beyond terminal-first usage.
+- CI and release hardening for team workflows.
+
+## Contributing
+
+The project is early and changing quickly, so small, focused PRs are preferred.
+
+When contributing:
+
+1. Keep layer boundaries intact.
+2. Add or update tests for behavior changes.
+3. Avoid cross-layer shortcuts for convenience.
+4. Document new modules and config changes.
+
+## Acknowledgement
+
+This README structure is inspired by the clarity and onboarding style of [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent), while the architecture and implementation goals here are specific to BadDragon.
